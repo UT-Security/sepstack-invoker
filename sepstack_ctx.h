@@ -8,8 +8,6 @@ extern "C" {
 #endif
 
 struct sepstack_context_t;
-sepstack_context_t *get_saved_sepstack_context();
-void set_saved_sepstack_context(sepstack_context_t *val);
 
 #ifdef __cplusplus
 }

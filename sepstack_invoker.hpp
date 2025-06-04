@@ -300,12 +300,21 @@ uint64_t &get_stack_register_ref(sepstack_context_t *ctx) {
 
 //////////////////
 
-void safe_range(uintptr_t start, uintptr_t end) { return; }
+void safe_range(uintptr_t sbx_mem_start, uintptr_t sbx_mem_end, uintptr_t start,
+                uintptr_t end) {
+  if (start > end)
+    abort();
+  if (start < sbx_mem_start || start > sbx_mem_end)
+    abort();
+  if (end < sbx_mem_start || end > sbx_mem_end)
+    abort();
+}
 
 template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           unsigned int FloatRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations>
-void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
+void push_param(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
+                uintptr_t sbx_mem_end, uintptr_t stackloc,
                 uintptr_t stack_extradata_loc) {}
 
 template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
@@ -313,19 +322,21 @@ template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TFormalParam, typename... TFormalParams,
           typename TActualParam, typename... TActualParams>
-void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
+void push_param(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
+                uintptr_t sbx_mem_end, uintptr_t stackloc,
                 uintptr_t stack_extradata_loc, TActualParam arg,
                 TActualParams &&...args) {
   if constexpr (ParamDestinations[I] == param_location_t::STACK) {
 
     TFormalParam argCast = static_cast<TFormalParam>(arg);
-    safe_range(stackloc, stackloc + sizeof(argCast));
+    safe_range(sbx_mem_start, sbx_mem_end, stackloc,
+               stackloc + sizeof(argCast));
     memcpy((char *)stackloc, &argCast, sizeof(argCast));
     stackloc += align_round_up(sizeof(argCast), sizeof(uintptr_t));
 
     push_param<I + 1, TotalParams, IntRegParams, FloatRegParams,
                ParamDestinations, TFormalParams...>(
-        ctx, stackloc, stack_extradata_loc,
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
         std::forward<TActualParams>(args)...);
 
   } else if constexpr (ParamDestinations[I] == param_location_t::INT_REG) {
@@ -342,7 +353,7 @@ void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
 
     push_param<I + 1, TotalParams, IntRegParams + 1, FloatRegParams,
                ParamDestinations, TFormalParams...>(
-        ctx, stackloc, stack_extradata_loc,
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
         std::forward<TActualParams>(args)...);
 
   } else if constexpr (ParamDestinations[I] == param_location_t::INT_REG2) {
@@ -355,7 +366,7 @@ void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
 
     push_param<I + 1, TotalParams, IntRegParams + 2, FloatRegParams,
                ParamDestinations, TFormalParams...>(
-        ctx, stackloc, stack_extradata_loc,
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
         std::forward<TActualParams>(args)...);
 
   } else if constexpr (ParamDestinations[I] == param_location_t::FLOAT_REG) {
@@ -368,14 +379,15 @@ void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
 
     push_param<I + 1, TotalParams, IntRegParams, FloatRegParams + 1,
                ParamDestinations, TFormalParams...>(
-        ctx, stackloc, stack_extradata_loc,
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
         std::forward<TActualParams>(args)...);
 
   } else if constexpr (ParamDestinations[I] ==
                        param_location_t::STACK_REFERENCE_IN_REG) {
 
     TFormalParam argCast = static_cast<TFormalParam>(arg);
-    safe_range(stack_extradata_loc, stack_extradata_loc + sizeof(argCast));
+    safe_range(sbx_mem_start, sbx_mem_end, stack_extradata_loc,
+               stack_extradata_loc + sizeof(argCast));
     memcpy((char *)stack_extradata_loc, &argCast, sizeof(argCast));
 
     get_param_register_ref(ctx, REG_TYPE::INT, IntRegParams) =
@@ -385,17 +397,19 @@ void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
 
     push_param<I + 1, TotalParams, IntRegParams + 1, FloatRegParams,
                ParamDestinations, TFormalParams...>(
-        ctx, stackloc, stack_extradata_loc,
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
         std::forward<TActualParams>(args)...);
 
   } else if constexpr (ParamDestinations[I] ==
                        param_location_t::STACK_REFERENCE_IN_STACK) {
 
     TFormalParam argCast = static_cast<TFormalParam>(arg);
-    safe_range(stack_extradata_loc, stack_extradata_loc + sizeof(argCast));
+    safe_range(sbx_mem_start, sbx_mem_end, stack_extradata_loc,
+               stack_extradata_loc + sizeof(argCast));
     memcpy((char *)stack_extradata_loc, &argCast, sizeof(argCast));
 
-    safe_range(stackloc, stackloc + sizeof(TFormalParam *));
+    safe_range(sbx_mem_start, sbx_mem_end, stackloc,
+               stackloc + sizeof(TFormalParam *));
     memcpy((char *)stackloc, &stack_extradata_loc, sizeof(TFormalParam *));
     stackloc += sizeof(TFormalParam *);
 
@@ -403,7 +417,7 @@ void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
 
     push_param<I + 1, TotalParams, IntRegParams, FloatRegParams,
                ParamDestinations, TFormalParams...>(
-        ctx, stackloc, stack_extradata_loc,
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
         std::forward<TActualParams>(args)...);
 
   } else {
@@ -414,7 +428,8 @@ void push_param(sepstack_context_t *ctx, uintptr_t stackloc,
 template <unsigned int TotalParams, ret_location_t RetDestination,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TRet, typename... TFormalParams, typename... TActualParams>
-void *push_return_and_params(sepstack_context_t *ctx, uintptr_t stackloc,
+void *push_return_and_params(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
+                             uintptr_t sbx_mem_end, uintptr_t stackloc,
                              uintptr_t stack_extradata_loc,
                              TActualParams &&...args) {
 
@@ -423,15 +438,17 @@ void *push_return_and_params(sepstack_context_t *ctx, uintptr_t stackloc,
                 ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG) {
     ret = stack_extradata_loc;
     get_param_register_ref(ctx, REG_TYPE::INT, 0) = ret;
-    safe_range(stack_extradata_loc, stack_extradata_loc + sizeof(TRet));
+    safe_range(sbx_mem_start, sbx_mem_end, stack_extradata_loc,
+               stack_extradata_loc + sizeof(TRet));
     stack_extradata_loc += sizeof(TRet);
   } else if constexpr (RetDestination ==
                        ret_location_t::STACK_REFERENCE_IN_STACK_OUT_REG) {
     ret = stack_extradata_loc;
-    safe_range(stackloc, stackloc + sizeof(TRet *));
+    safe_range(sbx_mem_start, sbx_mem_end, stackloc, stackloc + sizeof(TRet *));
     memcpy((char *)stackloc, &ret, sizeof(TRet *));
     stackloc += sizeof(TRet *);
-    safe_range(stack_extradata_loc, stack_extradata_loc + sizeof(TRet));
+    safe_range(sbx_mem_start, sbx_mem_end, stack_extradata_loc,
+               stack_extradata_loc + sizeof(TRet));
     stack_extradata_loc += sizeof(TRet);
   } else if constexpr (RetDestination == ret_location_t::INT_REG ||
                        RetDestination == ret_location_t::INT_REG2 ||
@@ -445,7 +462,8 @@ void *push_return_and_params(sepstack_context_t *ctx, uintptr_t stackloc,
       (RetDestination == ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG) ? 1
                                                                          : 0;
   push_param<0, TotalParams, IntRegParams, 0, ParamDestinations,
-             TFormalParams...>(ctx, stackloc, stack_extradata_loc,
+             TFormalParams...>(ctx, sbx_mem_start, sbx_mem_end, stackloc,
+                               stack_extradata_loc,
                                std::forward<TActualParams>(args)...);
 
   return (void *)ret;
@@ -488,6 +506,8 @@ static constexpr unsigned int stack_param_offset = 8;
 
 template <typename TRet, typename... TFormalParams, typename... TActualParams>
 auto invoke_func_on_separate_stack_helper(sepstack_context_t *ctx,
+                                          uintptr_t sbx_mem_start,
+                                          uintptr_t sbx_mem_end,
                                           TRet (*dummy)(TFormalParams...),
                                           TActualParams &&...args) {
   constexpr return_info_t ret_info =
@@ -511,7 +531,7 @@ auto invoke_func_on_separate_stack_helper(sepstack_context_t *ctx,
   void *return_slot =
       push_return_and_params<sizeof...(TFormalParams), ret_info.destination,
                              param_info.destinations, TRet, TFormalParams...>(
-          ctx, new_stack_loc, stack_extradata_loc,
+          ctx, sbx_mem_start, sbx_mem_end, new_stack_loc, stack_extradata_loc,
           std::forward<TActualParams>(args)...);
 
   trampoline_stack_change();
@@ -543,6 +563,8 @@ template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           unsigned int FloatRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations>
 std::tuple<> collect_params_from_context_noret(sepstack_context_t *ctx,
+                                               uintptr_t sbx_mem_start,
+                                               uintptr_t sbx_mem_end,
                                                uintptr_t stackloc) {
   return std::tuple<>{};
 }
@@ -552,17 +574,19 @@ template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TParam, typename... TParams>
 std::tuple<TParam, TParams...>
-collect_params_from_context_noret(sepstack_context_t *ctx, uintptr_t stackloc) {
+collect_params_from_context_noret(sepstack_context_t *ctx,
+                                  uintptr_t sbx_mem_start,
+                                  uintptr_t sbx_mem_end, uintptr_t stackloc) {
   if constexpr (ParamDestinations[I] == param_location_t::STACK) {
     TParam arg;
-    safe_range(stackloc, stackloc + sizeof(arg));
+    safe_range(sbx_mem_start, sbx_mem_end, stackloc, stackloc + sizeof(arg));
     memcpy(&arg, (char *)stackloc, sizeof(arg));
     stackloc += align_round_up(sizeof(arg), sizeof(uintptr_t));
 
-    auto rem =
-        collect_params_from_context_noret<I + 1, TotalParams, IntRegParams,
-                                          FloatRegParams, ParamDestinations,
-                                          TParams...>(ctx, stackloc);
+    auto rem = collect_params_from_context_noret<I + 1, TotalParams,
+                                                 IntRegParams, FloatRegParams,
+                                                 ParamDestinations, TParams...>(
+        ctx, sbx_mem_start, sbx_mem_end, stackloc);
     auto ret = std::tuple_cat(std::make_tuple(arg), rem);
     return ret;
   } else if constexpr (ParamDestinations[I] == param_location_t::INT_REG) {
@@ -573,7 +597,8 @@ collect_params_from_context_noret(sepstack_context_t *ctx, uintptr_t stackloc) {
     auto rem =
         collect_params_from_context_noret<I + 1, TotalParams, IntRegParams + 1,
                                           FloatRegParams, ParamDestinations,
-                                          TParams...>(ctx, stackloc);
+                                          TParams...>(ctx, sbx_mem_start,
+                                                      sbx_mem_end, stackloc);
     auto ret = std::tuple_cat(std::make_tuple(arg), rem);
     return ret;
   } else if constexpr (ParamDestinations[I] == param_location_t::INT_REG2) {
@@ -591,7 +616,8 @@ collect_params_from_context_noret(sepstack_context_t *ctx, uintptr_t stackloc) {
     auto rem =
         collect_params_from_context_noret<I + 1, TotalParams, IntRegParams + 2,
                                           FloatRegParams, ParamDestinations,
-                                          TParams...>(ctx, stackloc);
+                                          TParams...>(ctx, sbx_mem_start,
+                                                      sbx_mem_end, stackloc);
     auto ret = std::tuple_cat(std::make_tuple(arg), rem);
     return ret;
   } else if constexpr (ParamDestinations[I] == param_location_t::FLOAT_REG) {
@@ -602,7 +628,8 @@ collect_params_from_context_noret(sepstack_context_t *ctx, uintptr_t stackloc) {
     auto rem =
         collect_params_from_context_noret<I + 1, TotalParams, IntRegParams,
                                           FloatRegParams + 1, ParamDestinations,
-                                          TParams...>(ctx, stackloc);
+                                          TParams...>(ctx, sbx_mem_start,
+                                                      sbx_mem_end, stackloc);
     auto ret = std::tuple_cat(std::make_tuple(arg), rem);
     return ret;
   } else if constexpr (ParamDestinations[I] ==
@@ -610,31 +637,33 @@ collect_params_from_context_noret(sepstack_context_t *ctx, uintptr_t stackloc) {
     uintptr_t stack_ref =
         get_param_register_ref(ctx, REG_TYPE::INT, IntRegParams);
     TParam arg;
-    safe_range(stack_ref, stack_ref + sizeof(arg));
+    safe_range(sbx_mem_start, sbx_mem_end, stack_ref, stack_ref + sizeof(arg));
     memcpy(&arg, (char *)stack_ref, sizeof(arg));
 
     auto rem =
         collect_params_from_context_noret<I + 1, TotalParams, IntRegParams + 1,
                                           FloatRegParams, ParamDestinations,
-                                          TParams...>(ctx, stackloc);
+                                          TParams...>(ctx, sbx_mem_start,
+                                                      sbx_mem_end, stackloc);
     auto ret = std::tuple_cat(std::make_tuple(arg), rem);
     return ret;
 
   } else if constexpr (ParamDestinations[I] ==
                        param_location_t::STACK_REFERENCE_IN_STACK) {
     uintptr_t stack_ref = 0;
-    safe_range(stackloc, stackloc + sizeof(stack_ref));
+    safe_range(sbx_mem_start, sbx_mem_end, stackloc,
+               stackloc + sizeof(stack_ref));
     memcpy(&stack_ref, (char *)stackloc, sizeof(stack_ref));
     stackloc += sizeof(TParam *);
 
     TParam arg;
-    safe_range(stack_ref, stack_ref + sizeof(arg));
+    safe_range(sbx_mem_start, sbx_mem_end, stack_ref, stack_ref + sizeof(arg));
     memcpy(&arg, (char *)stack_ref, sizeof(arg));
 
-    auto rem =
-        collect_params_from_context_noret<I + 1, TotalParams, IntRegParams,
-                                          FloatRegParams, ParamDestinations,
-                                          TParams...>(ctx, stackloc);
+    auto rem = collect_params_from_context_noret<I + 1, TotalParams,
+                                                 IntRegParams, FloatRegParams,
+                                                 ParamDestinations, TParams...>(
+        ctx, sbx_mem_start, sbx_mem_end, stackloc);
     auto ret = std::tuple_cat(std::make_tuple(arg), rem);
     return ret;
   } else {
@@ -645,9 +674,10 @@ collect_params_from_context_noret(sepstack_context_t *ctx, uintptr_t stackloc) {
 template <unsigned int TotalParams, ret_location_t RetDestination,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TRet, typename... TParams>
-std::tuple<TParams...> collect_params_from_context(sepstack_context_t *ctx,
-                                                   uintptr_t stackloc,
-                                                   uintptr_t *out_ret_slot) {
+std::tuple<TParams...>
+collect_params_from_context(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
+                            uintptr_t sbx_mem_end, uintptr_t stackloc,
+                            uintptr_t *out_ret_slot) {
 
   *out_ret_slot = 0;
   stackloc += stack_param_offset;
@@ -666,11 +696,13 @@ std::tuple<TParams...> collect_params_from_context(sepstack_context_t *ctx,
                                                                          : 0;
   return collect_params_from_context_noret<0, TotalParams, IntRegParams, 0,
                                            ParamDestinations, TParams...>(
-      ctx, stackloc);
+      ctx, sbx_mem_start, sbx_mem_end, stackloc);
 }
 
 template <typename TRet, typename... TParams>
 auto invoke_callback_from_separate_stack_helper(sepstack_context_t *ctx,
+                                                uintptr_t sbx_mem_start,
+                                                uintptr_t sbx_mem_end,
                                                 TRet (*func_ptr)(TParams...),
                                                 uintptr_t stackloc) {
   constexpr return_info_t ret_info =
@@ -685,7 +717,8 @@ auto invoke_callback_from_separate_stack_helper(sepstack_context_t *ctx,
   auto params =
       collect_params_from_context<sizeof...(TParams), ret_info.destination,
                                   param_info.destinations, TRet, TParams...>(
-          ctx, get_stack_register_ref(ctx), &ret_slot);
+          ctx, sbx_mem_start, sbx_mem_end, get_stack_register_ref(ctx),
+          &ret_slot);
 
   if constexpr (ret_info.destination == ret_location_t::INT_REG) {
     TRet ret = std::apply(func_ptr, params);
@@ -711,7 +744,7 @@ auto invoke_callback_from_separate_stack_helper(sepstack_context_t *ctx,
     // set return register
     get_return_register_ref(ctx, REG_TYPE::INT, 0) = ret_slot;
     // copy ret to sbx stack
-    safe_range(ret_slot, ret_slot + sizeof(TRet));
+    safe_range(sbx_mem_start, sbx_mem_end, ret_slot, ret_slot + sizeof(TRet));
     memcpy((char *)ret_slot, &ret, sizeof(TRet));
   } else {
     static_assert(!true_v<TRet>, "Unknown case");
@@ -738,10 +771,11 @@ using memberfuncptr_to_cfuncptr_t =
 }; // namespace sepstack_invoker_detail
 
 template <typename TFuncPtr, typename... TActualParams>
-auto invoke_func_on_separate_stack(uintptr_t sbx_stack_loc,
+auto invoke_func_on_separate_stack(uintptr_t sbx_mem_start,
+                                   uintptr_t sbx_mem_end,
+                                   uintptr_t sbx_stack_loc,
                                    uintptr_t target_func,
                                    TActualParams &&...args) {
-
   static_assert(
       std::is_invocable_v<std::remove_pointer_t<TFuncPtr>, TActualParams...>,
       "Calling function with incorrect parameters");
@@ -760,16 +794,18 @@ auto invoke_func_on_separate_stack(uintptr_t sbx_stack_loc,
   new_context.target_prog_ctr = target_func;
 
   return sepstack_invoker_detail::invoke_func_on_separate_stack_helper(
-      saved_sepstack_context, static_cast<TCFuncPtr>(0),
-      std::forward<TActualParams>(args)...);
+      saved_sepstack_context, sbx_mem_start, sbx_mem_end,
+      static_cast<TCFuncPtr>(0), std::forward<TActualParams>(args)...);
 }
 
 template <typename TFuncPtr>
-auto invoke_callback_from_separate_stack(TFuncPtr func_ptr,
-                                         uintptr_t stackloc) {
-
+auto invoke_callback_from_separate_stack(uintptr_t sbx_mem_start,
+                                         uintptr_t sbx_mem_end,
+                                         uintptr_t stackloc,
+                                         TFuncPtr func_ptr) {
   using TCFuncPtr =
       sepstack_invoker_detail::memberfuncptr_to_cfuncptr_t<TFuncPtr>;
   return sepstack_invoker_detail::invoke_callback_from_separate_stack_helper(
-      saved_sepstack_context, (TCFuncPtr)func_ptr, stackloc);
+      saved_sepstack_context, sbx_mem_start, sbx_mem_end, (TCFuncPtr)func_ptr,
+      stackloc);
 }

@@ -136,7 +136,7 @@ void app_intercept() {
   printf("In callback intercept\n");
 
   return invoke_callback_from_separate_stack(
-      &app_func, saved_sepstack_context->target_stack_ptr);
+      0, UINT64_MAX, saved_sepstack_context->target_stack_ptr, &app_func);
 }
 
 int main(int argc, char **argv) {
@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
   auto target_func_ptr = &testCallback;
 
   auto ret = invoke_func_on_separate_stack<decltype(target_func_ptr)>(
-      sbx_stack_end, reinterpret_cast<uintptr_t>(target_func_ptr));
+       0, UINT64_MAX, sbx_stack_end, reinterpret_cast<uintptr_t>(target_func_ptr));
   // , 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
 
   std::cout << "Got val " << ret << "\n";
