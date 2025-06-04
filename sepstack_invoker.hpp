@@ -86,6 +86,7 @@ enum class ret_location_t {
   // reg
   STACK_REFERENCE_IN_REG_OUT_REG,
   STACK_REFERENCE_IN_STACK_OUT_REG,
+  NONE,
 };
 
 template <typename T>
@@ -130,9 +131,11 @@ constexpr return_info_t classify_return() {
 
   using NoVoid_TRet = std::conditional_t<std::is_void_v<TRet>, int, TRet>;
 
-  if constexpr (std::is_class_v<TRet> &&
-                (!is_class_with_trival_destr_and_copy_v<TRet> ||
-                 sizeof(NoVoid_TRet) > 16)) {
+  if constexpr (std::is_void_v<TRet>) {
+    ret.destination = ret_location_t::NONE;
+  } else if constexpr (std::is_class_v<TRet> &&
+                       (!is_class_with_trival_destr_and_copy_v<TRet> ||
+                        sizeof(NoVoid_TRet) > 16)) {
     ret.extra_stackdata_space = sizeof(TRet);
     if constexpr (TIntRegsLeft > 0) {
       ret.destination = ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG;
@@ -145,12 +148,12 @@ constexpr return_info_t classify_return() {
                         std::is_lvalue_reference_v<TRet> ||
                         std::is_enum_v<TRet> ||
                         is_class_with_trival_destr_and_copy_v<
-                            TRet>)&&sizeof(TRet) <= sizeof(void *)) {
+                            TRet>)&&sizeof(NoVoid_TRet) <= sizeof(void *)) {
     ret.destination = ret_location_t::INT_REG;
   } else if constexpr ((std::is_integral_v<TRet> ||
                         is_class_with_trival_destr_and_copy_v<
-                            TRet>)&&sizeof(TRet) > sizeof(void *) &&
-                       sizeof(TRet) <= 2 * sizeof(void *)) {
+                            TRet>)&&sizeof(NoVoid_TRet) > sizeof(void *) &&
+                       sizeof(NoVoid_TRet) <= 2 * sizeof(void *)) {
     ret.destination = ret_location_t::INT_REG2;
   } else if constexpr (std::is_floating_point_v<TRet>) {
     ret.destination = ret_location_t::FLOAT_REG;
@@ -452,7 +455,8 @@ void *push_return_and_params(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
     stack_extradata_loc += sizeof(TRet);
   } else if constexpr (RetDestination == ret_location_t::INT_REG ||
                        RetDestination == ret_location_t::INT_REG2 ||
-                       RetDestination == ret_location_t::FLOAT_REG) {
+                       RetDestination == ret_location_t::FLOAT_REG ||
+                       RetDestination == ret_location_t::NONE) {
     // noop
   } else {
     abort();
@@ -536,8 +540,10 @@ auto invoke_func_on_separate_stack_helper(sepstack_context_t *ctx,
 
   trampoline_stack_change();
 
-  if constexpr (ret_info.destination == ret_location_t::INT_REG ||
-                ret_info.destination == ret_location_t::FLOAT_REG) {
+  if constexpr (ret_info.destination == ret_location_t::NONE) {
+    // noop
+  } else if constexpr (ret_info.destination == ret_location_t::INT_REG ||
+                       ret_info.destination == ret_location_t::FLOAT_REG) {
     TRet ret;
     uintptr_t *src = ret_info.destination == ret_location_t::INT_REG
                          ? &get_return_register_ref(ctx, REG_TYPE::INT, 0)
@@ -720,7 +726,9 @@ auto invoke_callback_from_separate_stack_helper(sepstack_context_t *ctx,
           ctx, sbx_mem_start, sbx_mem_end, get_stack_register_ref(ctx),
           &ret_slot);
 
-  if constexpr (ret_info.destination == ret_location_t::INT_REG) {
+  if constexpr (ret_info.destination == ret_location_t::NONE) {
+    std::apply(func_ptr, params);
+  } else if constexpr (ret_info.destination == ret_location_t::INT_REG) {
     TRet ret = std::apply(func_ptr, params);
     uintptr_t copy = 0;
     memcpy(&copy, &ret, sizeof(TRet));
