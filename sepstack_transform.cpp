@@ -135,8 +135,7 @@ auto testCallback() {
 void app_intercept() {
   printf("In callback intercept\n");
 
-  return invoke_callback_from_separate_stack(
-      0, UINT64_MAX, saved_sepstack_context->target_stack_ptr, &app_func);
+  return invoke_callback_from_separate_stack(0, UINT64_MAX, &app_func);
 }
 
 int main(int argc, char **argv) {
