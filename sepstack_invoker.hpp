@@ -226,6 +226,11 @@ constexpr param_info_t<TotalParams> classify_params() {
   }
 }
 
+#if defined(unix) || defined(__unix) || defined(__unix__) || defined(linux) || \
+    defined(__linux) || defined(__linux__)
+
+#  if defined(_M_X64) || defined(__x86_64__)
+
 uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
                                  unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
@@ -261,7 +266,6 @@ uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
       return ctx->xmm7;
     }
   }
-
   abort();
 }
 
@@ -281,6 +285,18 @@ uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
 
   abort();
 }
+
+uint64_t &get_stack_register_ref(sepstack_context_t *ctx) {
+  return ctx->target_stack_ptr;
+}
+
+#  else
+#    error "Unsupported architecture"
+#  endif
+
+#else
+#  error "Unsupported OS"
+#endif
 
 //////////////////
 
@@ -482,18 +498,20 @@ auto invoke_func_on_separate_stack_helper(sepstack_context_t *ctx,
                       float_regs_available, 0, sizeof...(TFormalParams),
                       TFormalParams...>();
 
-  uintptr_t stack_extradata_loc = saved_sepstack_context->target_stack_ptr -
+  uintptr_t stack_extradata_loc = get_stack_register_ref(ctx) -
                                   ret_info.extra_stackdata_space -
                                   param_info.extra_stackdata_space;
 
-  saved_sepstack_context->target_stack_ptr = align_round_down(
+  uintptr_t new_stack_loc = align_round_down(
       stack_extradata_loc - ret_info.stack_space - param_info.stack_space,
       expected_stack_alignment);
+
+  get_stack_register_ref(ctx) = new_stack_loc;
 
   void *return_slot =
       push_return_and_params<sizeof...(TFormalParams), ret_info.destination,
                              param_info.destinations, TRet, TFormalParams...>(
-          ctx, saved_sepstack_context->target_stack_ptr, stack_extradata_loc,
+          ctx, new_stack_loc, stack_extradata_loc,
           std::forward<TActualParams>(args)...);
 
   trampoline_stack_change();
@@ -667,7 +685,7 @@ auto invoke_callback_from_separate_stack_helper(sepstack_context_t *ctx,
   auto params =
       collect_params_from_context<sizeof...(TParams), ret_info.destination,
                                   param_info.destinations, TRet, TParams...>(
-          ctx, saved_sepstack_context->target_stack_ptr, &ret_slot);
+          ctx, get_stack_register_ref(ctx), &ret_slot);
 
   if constexpr (ret_info.destination == ret_location_t::INT_REG) {
     TRet ret = std::apply(func_ptr, params);
