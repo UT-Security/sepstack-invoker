@@ -7,6 +7,13 @@
 
 #include "sepstack_invoker.hpp"
 
+extern "C" {
+__attribute__((weak)) thread_local void *callback_func = 0;
+
+extern void *springboard_stack_change;
+}
+
+
 template <typename... TArgs> void printTypes() {
 #if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
   puts(__PRETTY_FUNCTION__); // NOLINT
