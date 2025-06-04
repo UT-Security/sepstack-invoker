@@ -1,3 +1,4 @@
+#include <array>
 #include <iostream>
 #include <memory>
 #include <stdint.h>
@@ -814,7 +815,6 @@ COLOR testEnumReturn() { return GREEN; }
 int testArrParam(int a[2]) { return a[0] + a[1]; }
 
 int testRefParam(int &a) { return a; }
-int &testRefRet(int &a) { return a; }
 
 unsigned int stackParametersTestInt(unsigned int a1, unsigned int a2,
                                     unsigned int a3, unsigned int a4,
@@ -824,6 +824,9 @@ unsigned int stackParametersTestInt(unsigned int a1, unsigned int a2,
                                     unsigned int a11) {
   return a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11;
 }
+}
+
+int &testRefRet(int &a) { return a; }
 
 auto app_func(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8,
               int a9, int a10, int a11) {
@@ -847,7 +850,7 @@ auto testCallback() {
   auto ret = (*target_func_ptr)(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
   return ret;
 }
-}
+
 
 void app_intercept() {
   printf("In callback intercept\n");
