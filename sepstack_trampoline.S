@@ -70,6 +70,7 @@ trampoline_stack_change:
 	movq  %rax, SEPSTACK_CONTEXT_OFFSET_RAX(%r11)
 	movq  %rdx, SEPSTACK_CONTEXT_OFFSET_RDX(%r11)
 	movsd  %xmm0, SEPSTACK_CONTEXT_OFFSET_XMM0(%r11)
+	movsd  %xmm1, SEPSTACK_CONTEXT_OFFSET_XMM1(%r11)
 
 	// Clear direction flag before call or return
 	cld
@@ -150,6 +151,7 @@ springboard_stack_change:
 	movq SEPSTACK_CONTEXT_OFFSET_RAX(%r11), %rax
 	movq SEPSTACK_CONTEXT_OFFSET_RDX(%r11), %rdx
 	movsd SEPSTACK_CONTEXT_OFFSET_XMM0(%r11), %xmm0
+	movsd SEPSTACK_CONTEXT_OFFSET_XMM1(%r11), %xmm1
 
 	// Restore the sandbox stack
 	movq SEPSTACK_CONTEXT_OFFSET_TARGET_STACK_PTR(%r11), %rsp

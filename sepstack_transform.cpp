@@ -27,11 +27,6 @@ template <typename... TArgs> void printTypes() {
 
 ///////////////
 
-class foo {
-public:
-  uint64_t a;
-  uint64_t b;
-};
 
 class bar {
 public:
@@ -74,17 +69,37 @@ int testIntReturn(int a) { return a + 4; }
 float testFloatReturn(float a) { return a + 4.2; }
 double testDoubleReturn(double a) { return a + 4.2; }
 
-foo testStructReturn() {
-  foo ret;
-  ret.a = 5;
-  ret.b = 9;
-  return ret;
-}
 
-uint64_t testClassParam(foo p) {
-  asm volatile("");
-  return p.a;
-}
+typedef struct uu { uint64_t a; uint64_t b; } uu;
+typedef struct ud { uint64_t a; double b; } ud;
+typedef struct du { double a; uint64_t b; } du;
+typedef struct dd { double a; double b; } dd;
+
+typedef struct u64 { uint64_t a; } u64;
+typedef struct d64 { double a; } d64;
+
+typedef struct u64u64 { u64 a; u64 b; } u64u64;
+typedef struct u64d64 { u64 a; d64 b; } u64d64;
+typedef struct d64u64 { d64 a; u64 b; } d64u64;
+typedef struct d64d64 { d64 a; d64 b; } d64d64;
+
+uu retuu() { uu ret = {13, 14}; return ret; }
+ud retud() { ud ret = {23, 24}; return ret; }
+du retdu() { du ret = {33, 34}; return ret; }
+dd retdd() { dd ret = {43, 44}; return ret; }
+u64u64 retu64u64() { u64u64 ret = {53, 54}; return ret; }
+u64d64 retu64d64() { u64d64 ret = {63, 64}; return ret; }
+d64u64 retd64u64() { d64u64 ret = {73, 74}; return ret; }
+d64d64 retd64d64() { d64d64 ret = {83, 84}; return ret; }
+
+uint64_t paruu(uu p) { return p.a; }
+uint64_t parud(ud p) { return p.a; }
+double pardu(du p) { return p.a; }
+double pardd(dd p) { return p.a; }
+u64 paru64u64(u64u64 p) { return p.a; }
+u64 paru64d64(u64d64 p) { return p.a; }
+d64 pard64u64(d64u64 p) { return p.a; }
+d64 pard64d64(d64d64 p) { return p.a; }
 
 void testComplexClassParam(bar p) { asm volatile(""); }
 
@@ -148,14 +163,23 @@ int main(int argc, char **argv) {
 
   // auto target_func_ptr = &stackParametersTestInt;
 
-  callback_func = (void *)&app_intercept;
-  auto target_func_ptr = &testCallback;
+  {
+    auto target_func_ptr = &retdu;
+    auto ret = invoke_func_on_separate_stack<decltype(target_func_ptr)>(
+      0, UINT64_MAX, sbx_stack_end, reinterpret_cast<uintptr_t>(target_func_ptr));
 
-  auto ret = invoke_func_on_separate_stack<decltype(target_func_ptr)>(
-       0, UINT64_MAX, sbx_stack_end, reinterpret_cast<uintptr_t>(target_func_ptr));
-  // , 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+    std::cout << "Got val " << ret.a <<  ", " << ret.b << "\n";
+  }
+  {
+    callback_func = (void *)&app_intercept;
+    auto target_func_ptr = &testCallback;
 
-  std::cout << "Got val " << ret << "\n";
+    auto ret = invoke_func_on_separate_stack<decltype(target_func_ptr)>(
+        0, UINT64_MAX, sbx_stack_end, reinterpret_cast<uintptr_t>(target_func_ptr));
+    // , 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+
+    std::cout << "Got val " << ret << "\n";
+  }
 
   return 0;
 }

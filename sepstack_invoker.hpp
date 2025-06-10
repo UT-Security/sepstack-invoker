@@ -73,6 +73,9 @@ enum class param_location_t {
   INT_REG,
   FLOAT_REG,
   INT_REG2,
+  INT_FLOAT_REG,
+  FLOAT_INT_REG,
+  FLOAT_REG2,
   STACK,
   STACK_REFERENCE_IN_REG,
   STACK_REFERENCE_IN_STACK,
@@ -82,7 +85,10 @@ enum class ret_location_t {
   INT_REG,
   FLOAT_REG,
   INT_REG2,
-  // Stack references specified as a paremeter in a reg or stack but output in
+  INT_FLOAT_REG,
+  FLOAT_INT_REG,
+  FLOAT_REG2, // Stack references specified as a paremeter in a reg or stack but
+              // output in
   // reg
   STACK_REFERENCE_IN_REG_OUT_REG,
   STACK_REFERENCE_IN_STACK_OUT_REG,
@@ -97,6 +103,19 @@ static constexpr bool is_trival_destr_and_copy_v =
 template <typename T>
 static constexpr bool is_class_with_trival_destr_and_copy_v =
     std::is_class_v<T> &&is_trival_destr_and_copy_v<T>;
+
+template <typename T>
+static constexpr bool is_one_reg_size = sizeof(T) <= sizeof(void *);
+template <typename T>
+static constexpr bool is_two_reg_size = sizeof(T) > sizeof(void *) &&
+                                        sizeof(T) <= 2 * sizeof(void *);
+
+// todo
+template <typename T> static constexpr bool is_pair_class = is_two_reg_size<T>;
+
+template <typename T> using pair_class_first_type = double;
+
+template <typename T> using pair_class_second_type = uint64_t;
 
 struct return_info_t {
   unsigned int int_registers_used;
@@ -125,6 +144,53 @@ enum class REG_TYPE { INT, FLOAT };
 
 //////////////////
 
+#if defined(unix) || defined(__unix) || defined(__unix__) || defined(linux) || \
+    defined(__linux) || defined(__linux__)
+
+#  if defined(_M_X64) || defined(__x86_64__)
+static constexpr unsigned int int_regs_available = 6;
+static constexpr unsigned int float_regs_available = 8;
+// Stack alignment is usually 16. However, there are some corner cases such as
+// use of __m256 that require 32 alignment. So we can always align to 32 to
+// keep things safe.
+static constexpr unsigned int expected_stack_alignment = 32;
+static constexpr unsigned int stack_param_offset = 8;
+// Do pair structs (structs with two fields) of type <uint64_t, double> when
+// passed as parameters (or return values) get treated as a uint64_t and double?
+// If yes, this is true. Else if they are treated as two uint64_t, this is
+// false.
+static constexpr bool mixed_pair_structs_supported = true;
+#  elif defined(__aarch64__)
+static constexpr unsigned int int_regs_available = 8;
+static constexpr unsigned int float_regs_available = 8;
+static constexpr unsigned int expected_stack_alignment = 16;
+static constexpr unsigned int stack_param_offset = 0;
+// Do pair structs (structs with two fields) of type <uint64_t, double> when
+// passed as parameters (or return values) get treated as a uint64_t and double?
+// If yes, this is true. Else if they are treated as two uint64_t, this is
+// false.
+static constexpr bool mixed_pair_structs_supported = false;
+#  else
+#    error "Unsupported architecture"
+#  endif
+
+#elif defined(_WIN32)
+
+#  if defined(_M_X64) || defined(__x86_64__)
+static constexpr unsigned int int_regs_available = 4;
+static constexpr unsigned int float_regs_available = 4;
+static constexpr unsigned int expected_stack_alignment = 16;
+static constexpr unsigned int stack_param_offset = 8;
+#  else
+#    error "Unsupported architecture"
+#  endif
+
+#else
+#  error "Unsupported OS"
+#endif
+
+//////////////////
+
 template <unsigned int TIntRegsLeft, typename TRet>
 constexpr return_info_t classify_return() {
   return_info_t ret{0};
@@ -144,19 +210,39 @@ constexpr return_info_t classify_return() {
       ret.destination = ret_location_t::STACK_REFERENCE_IN_STACK_OUT_REG;
       ret.stack_space = sizeof(void *);
     }
-  } else if constexpr ((std::is_integral_v<TRet> || std::is_pointer_v<TRet> ||
-                        std::is_lvalue_reference_v<TRet> ||
-                        std::is_enum_v<TRet> ||
-                        is_class_with_trival_destr_and_copy_v<
-                            TRet>)&&sizeof(NoVoid_TRet) <= sizeof(void *)) {
-    ret.destination = ret_location_t::INT_REG;
-  } else if constexpr ((std::is_integral_v<TRet> ||
-                        is_class_with_trival_destr_and_copy_v<
-                            TRet>)&&sizeof(NoVoid_TRet) > sizeof(void *) &&
-                       sizeof(NoVoid_TRet) <= 2 * sizeof(void *)) {
-    ret.destination = ret_location_t::INT_REG2;
   } else if constexpr (std::is_floating_point_v<TRet>) {
     ret.destination = ret_location_t::FLOAT_REG;
+  } else if constexpr (is_one_reg_size<NoVoid_TRet> &&
+                       (std::is_integral_v<TRet> || std::is_pointer_v<TRet> ||
+                        std::is_lvalue_reference_v<TRet> ||
+                        std::is_enum_v<TRet> ||
+                        is_class_with_trival_destr_and_copy_v<TRet>)) {
+    ret.destination = ret_location_t::INT_REG;
+  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
+                       std::is_integral_v<TRet>) {
+    ret.destination = ret_location_t::INT_REG2;
+  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
+                       is_class_with_trival_destr_and_copy_v<TRet> &&
+                       is_pair_class<TRet> &&
+                       std::is_floating_point_v<pair_class_first_type<TRet>> &&
+                       std::is_floating_point_v<pair_class_second_type<TRet>>) {
+    ret.destination = ret_location_t::FLOAT_REG2;
+  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
+                       is_class_with_trival_destr_and_copy_v<TRet> &&
+                       is_pair_class<TRet> && mixed_pair_structs_supported &&
+                       std::is_integral_v<pair_class_first_type<TRet>> &&
+                       std::is_floating_point_v<pair_class_second_type<TRet>>) {
+    ret.destination = ret_location_t::INT_FLOAT_REG;
+  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
+                       is_class_with_trival_destr_and_copy_v<TRet> &&
+                       is_pair_class<TRet> && mixed_pair_structs_supported &&
+                       std::is_floating_point_v<pair_class_first_type<TRet>> &&
+                       std::is_integral_v<pair_class_second_type<TRet>>) {
+    ret.destination = ret_location_t::FLOAT_INT_REG;
+  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
+                       is_class_with_trival_destr_and_copy_v<TRet> &&
+                       is_pair_class<TRet>) {
+    ret.destination = ret_location_t::INT_REG2;
   } else {
     static_assert(!true_v<TRet>, "Unknown case");
   }
@@ -181,24 +267,60 @@ constexpr param_info_t<TotalParams> classify_params() {
                                TotalParams, TFormalParams...>();
     ret.destinations[I] = param_location_t::FLOAT_REG;
     return ret;
-  } else if constexpr (TIntRegsLeft > 0 &&
+  } else if constexpr (is_one_reg_size<TFormalParam> && TIntRegsLeft > 0 &&
                        (std::is_integral_v<TFormalParam> ||
                         std::is_pointer_v<TFormalParam> ||
                         std::is_lvalue_reference_v<TFormalParam> ||
                         std::is_enum_v<TFormalParam> ||
-                        is_class_with_trival_destr_and_copy_v<
-                            TFormalParam>)&&sizeof(TFormalParam) <=
-                           sizeof(void *)) {
+                        is_class_with_trival_destr_and_copy_v<TFormalParam>)) {
     auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft, I + 1,
                                TotalParams, TFormalParams...>();
     ret.destinations[I] = param_location_t::INT_REG;
     return ret;
-  } else if constexpr (TIntRegsLeft > 1 &&
-                       (std::is_integral_v<TFormalParam> ||
-                        is_class_with_trival_destr_and_copy_v<
-                            TFormalParam>)&&sizeof(TFormalParam) >
-                           sizeof(void *) &&
-                       sizeof(TFormalParam) <= 2 * sizeof(void *)) {
+  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
+                       std::is_integral_v<TFormalParam>) {
+    auto ret = classify_params<TIntRegsLeft - 2, TFloatRegsLeft, I + 1,
+                               TotalParams, TFormalParams...>();
+    ret.destinations[I] = param_location_t::INT_REG2;
+    return ret;
+  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
+                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
+                       is_pair_class<TFormalParam> &&
+                       std::is_floating_point_v<
+                           pair_class_first_type<TFormalParam>> &&
+                       std::is_floating_point_v<
+                           pair_class_second_type<TFormalParam>>) {
+    auto ret = classify_params<TIntRegsLeft, TFloatRegsLeft - 2, I + 1,
+                               TotalParams, TFormalParams...>();
+    ret.destinations[I] = param_location_t::FLOAT_REG2;
+    return ret;
+  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
+                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
+                       is_pair_class<TFormalParam> &&
+                       mixed_pair_structs_supported &&
+                       std::is_integral_v<
+                           pair_class_first_type<TFormalParam>> &&
+                       std::is_floating_point_v<
+                           pair_class_second_type<TFormalParam>>) {
+    auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft - 1, I + 1,
+                               TotalParams, TFormalParams...>();
+    ret.destinations[I] = param_location_t::INT_FLOAT_REG;
+    return ret;
+  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
+                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
+                       is_pair_class<TFormalParam> &&
+                       mixed_pair_structs_supported &&
+                       std::is_floating_point_v<
+                           pair_class_first_type<TFormalParam>> &&
+                       std::is_integral_v<
+                           pair_class_second_type<TFormalParam>>) {
+    auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft - 1, I + 1,
+                               TotalParams, TFormalParams...>();
+    ret.destinations[I] = param_location_t::FLOAT_INT_REG;
+    return ret;
+  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
+                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
+                       is_pair_class<TFormalParam>) {
     auto ret = classify_params<TIntRegsLeft - 2, TFloatRegsLeft, I + 1,
                                TotalParams, TFormalParams...>();
     ret.destinations[I] = param_location_t::INT_REG2;
@@ -283,6 +405,8 @@ uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
   } else if (type == REG_TYPE::FLOAT) {
     if (reg_num == 0) {
       return ctx->xmm0;
+    } else if (reg_num == 1) {
+      return ctx->xmm1;
     }
   }
 
@@ -371,6 +495,44 @@ void push_param(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
                ParamDestinations, TFormalParams...>(
         ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
         std::forward<TActualParams>(args)...);
+  } else if constexpr (ParamDestinations[I] ==
+                       param_location_t::INT_FLOAT_REG) {
+
+    TFormalParam argCast = static_cast<TFormalParam>(arg);
+    uint64_t copy[2] = {0, 0};
+    memcpy(&(copy[0]), &argCast, sizeof(argCast));
+    get_param_register_ref(ctx, REG_TYPE::INT, IntRegParams) = copy[0];
+    get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams) = copy[1];
+
+    push_param<I + 1, TotalParams, IntRegParams + 1, FloatRegParams + 1,
+               ParamDestinations, TFormalParams...>(
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
+        std::forward<TActualParams>(args)...);
+  } else if constexpr (ParamDestinations[I] ==
+                       param_location_t::FLOAT_INT_REG) {
+
+    TFormalParam argCast = static_cast<TFormalParam>(arg);
+    uint64_t copy[2] = {0, 0};
+    memcpy(&(copy[0]), &argCast, sizeof(argCast));
+    get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams) = copy[0];
+    get_param_register_ref(ctx, REG_TYPE::INT, IntRegParams) = copy[1];
+
+    push_param<I + 1, TotalParams, IntRegParams + 1, FloatRegParams + 1,
+               ParamDestinations, TFormalParams...>(
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
+        std::forward<TActualParams>(args)...);
+  } else if constexpr (ParamDestinations[I] == param_location_t::FLOAT_REG2) {
+
+    TFormalParam argCast = static_cast<TFormalParam>(arg);
+    uint64_t copy[2] = {0, 0};
+    memcpy(&(copy[0]), &argCast, sizeof(argCast));
+    get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams) = copy[0];
+    get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams + 1) = copy[1];
+
+    push_param<I + 1, TotalParams, IntRegParams, FloatRegParams + 2,
+               ParamDestinations, TFormalParams...>(
+        ctx, sbx_mem_start, sbx_mem_end, stackloc, stack_extradata_loc,
+        std::forward<TActualParams>(args)...);
 
   } else if constexpr (ParamDestinations[I] == param_location_t::FLOAT_REG) {
 
@@ -455,6 +617,9 @@ void *push_return_and_params(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
     stack_extradata_loc += sizeof(TRet);
   } else if constexpr (RetDestination == ret_location_t::INT_REG ||
                        RetDestination == ret_location_t::INT_REG2 ||
+                       RetDestination == ret_location_t::INT_FLOAT_REG ||
+                       RetDestination == ret_location_t::FLOAT_INT_REG ||
+                       RetDestination == ret_location_t::FLOAT_REG2 ||
                        RetDestination == ret_location_t::FLOAT_REG ||
                        RetDestination == ret_location_t::NONE) {
     // noop
@@ -472,41 +637,6 @@ void *push_return_and_params(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
 
   return (void *)ret;
 }
-
-#if defined(unix) || defined(__unix) || defined(__unix__) || defined(linux) || \
-    defined(__linux) || defined(__linux__)
-
-#  if defined(_M_X64) || defined(__x86_64__)
-static constexpr unsigned int int_regs_available = 6;
-static constexpr unsigned int float_regs_available = 8;
-// Stack alignment is usually 16. However, there are some corner cases such as
-// use of __m256 that require 32 alignment. So we can always align to 32 to
-// keep things safe.
-static constexpr unsigned int expected_stack_alignment = 32;
-static constexpr unsigned int stack_param_offset = 8;
-#  elif defined(__aarch64__)
-static constexpr unsigned int int_regs_available = 8;
-static constexpr unsigned int float_regs_available = 8;
-static constexpr unsigned int expected_stack_alignment = 16;
-static constexpr unsigned int stack_param_offset = 0;
-#  else
-#    error "Unsupported architecture"
-#  endif
-
-#elif defined(_WIN32)
-
-#  if defined(_M_X64) || defined(__x86_64__)
-static constexpr unsigned int int_regs_available = 4;
-static constexpr unsigned int float_regs_available = 4;
-static constexpr unsigned int expected_stack_alignment = 16;
-static constexpr unsigned int stack_param_offset = 8;
-#  else
-#    error "Unsupported architecture"
-#  endif
-
-#else
-#  error "Unsupported OS"
-#endif
 
 template <typename TRet, typename... TFormalParams, typename... TActualParams>
 auto invoke_func_on_separate_stack_helper(sepstack_context_t *ctx,
@@ -554,6 +684,30 @@ auto invoke_func_on_separate_stack_helper(sepstack_context_t *ctx,
     uint64_t copy[2];
     copy[0] = get_return_register_ref(ctx, REG_TYPE::INT, 0);
     copy[1] = get_return_register_ref(ctx, REG_TYPE::INT, 1);
+
+    TRet ret;
+    memcpy(&ret, copy, sizeof(TRet));
+    return ret;
+  } else if constexpr (ret_info.destination == ret_location_t::INT_FLOAT_REG) {
+    uint64_t copy[2];
+    copy[0] = get_return_register_ref(ctx, REG_TYPE::INT, 0);
+    copy[1] = get_return_register_ref(ctx, REG_TYPE::FLOAT, 0);
+
+    TRet ret;
+    memcpy(&ret, copy, sizeof(TRet));
+    return ret;
+  } else if constexpr (ret_info.destination == ret_location_t::FLOAT_INT_REG) {
+    uint64_t copy[2];
+    copy[0] = get_return_register_ref(ctx, REG_TYPE::FLOAT, 0);
+    copy[1] = get_return_register_ref(ctx, REG_TYPE::INT, 0);
+
+    TRet ret;
+    memcpy(&ret, copy, sizeof(TRet));
+    return ret;
+  } else if constexpr (ret_info.destination == ret_location_t::FLOAT_REG2) {
+    uint64_t copy[2];
+    copy[0] = get_return_register_ref(ctx, REG_TYPE::FLOAT, 0);
+    copy[1] = get_return_register_ref(ctx, REG_TYPE::FLOAT, 1);
 
     TRet ret;
     memcpy(&ret, copy, sizeof(TRet));
@@ -622,6 +776,65 @@ collect_params_from_context_noret(sepstack_context_t *ctx,
     auto rem =
         collect_params_from_context_noret<I + 1, TotalParams, IntRegParams + 2,
                                           FloatRegParams, ParamDestinations,
+                                          TParams...>(ctx, sbx_mem_start,
+                                                      sbx_mem_end, stackloc);
+    auto ret = std::tuple_cat(std::make_tuple(arg), rem);
+    return ret;
+  } else if constexpr (ParamDestinations[I] ==
+                       param_location_t::INT_FLOAT_REG) {
+    uint64_t copy[2] = {0, 0};
+    memcpy(&(copy[0]),
+           &get_param_register_ref(ctx, REG_TYPE::INT, IntRegParams),
+           sizeof(copy[0]));
+    memcpy(&(copy[1]),
+           &get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams),
+           sizeof(copy[1]));
+
+    TParam arg;
+    memcpy(&arg, copy, sizeof(arg));
+
+    auto rem =
+        collect_params_from_context_noret<I + 1, TotalParams, IntRegParams + 1,
+                                          FloatRegParams + 1, ParamDestinations,
+                                          TParams...>(ctx, sbx_mem_start,
+                                                      sbx_mem_end, stackloc);
+    auto ret = std::tuple_cat(std::make_tuple(arg), rem);
+    return ret;
+  } else if constexpr (ParamDestinations[I] ==
+                       param_location_t::FLOAT_INT_REG) {
+    uint64_t copy[2] = {0, 0};
+    memcpy(&(copy[0]),
+           &get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams),
+           sizeof(copy[0]));
+    memcpy(&(copy[1]),
+           &get_param_register_ref(ctx, REG_TYPE::INT, IntRegParams),
+           sizeof(copy[1]));
+
+    TParam arg;
+    memcpy(&arg, copy, sizeof(arg));
+
+    auto rem =
+        collect_params_from_context_noret<I + 1, TotalParams, IntRegParams + 1,
+                                          FloatRegParams + 1, ParamDestinations,
+                                          TParams...>(ctx, sbx_mem_start,
+                                                      sbx_mem_end, stackloc);
+    auto ret = std::tuple_cat(std::make_tuple(arg), rem);
+    return ret;
+  } else if constexpr (ParamDestinations[I] == param_location_t::FLOAT_REG2) {
+    uint64_t copy[2] = {0, 0};
+    memcpy(&(copy[0]),
+           &get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams),
+           sizeof(copy[0]));
+    memcpy(&(copy[1]),
+           &get_param_register_ref(ctx, REG_TYPE::FLOAT, FloatRegParams + 1),
+           sizeof(copy[1]));
+
+    TParam arg;
+    memcpy(&arg, copy, sizeof(arg));
+
+    auto rem =
+        collect_params_from_context_noret<I + 1, TotalParams, IntRegParams,
+                                          FloatRegParams + 2, ParamDestinations,
                                           TParams...>(ctx, sbx_mem_start,
                                                       sbx_mem_end, stackloc);
     auto ret = std::tuple_cat(std::make_tuple(arg), rem);
@@ -738,6 +951,24 @@ void invoke_callback_from_separate_stack_helper(sepstack_context_t *ctx,
     memcpy(copy, &ret, sizeof(TRet));
     get_return_register_ref(ctx, REG_TYPE::INT, 0) = copy[0];
     get_return_register_ref(ctx, REG_TYPE::INT, 1) = copy[1];
+  } else if constexpr (ret_info.destination == ret_location_t::INT_FLOAT_REG) {
+    TRet ret = std::apply(func_ptr, params);
+    uintptr_t copy[2]{0};
+    memcpy(copy, &ret, sizeof(TRet));
+    get_return_register_ref(ctx, REG_TYPE::INT, 0) = copy[0];
+    get_return_register_ref(ctx, REG_TYPE::FLOAT, 0) = copy[1];
+  } else if constexpr (ret_info.destination == ret_location_t::FLOAT_INT_REG) {
+    TRet ret = std::apply(func_ptr, params);
+    uintptr_t copy[2]{0};
+    memcpy(copy, &ret, sizeof(TRet));
+    get_return_register_ref(ctx, REG_TYPE::FLOAT, 0) = copy[0];
+    get_return_register_ref(ctx, REG_TYPE::INT, 0) = copy[1];
+  } else if constexpr (ret_info.destination == ret_location_t::FLOAT_REG2) {
+    TRet ret = std::apply(func_ptr, params);
+    uintptr_t copy[2]{0};
+    memcpy(copy, &ret, sizeof(TRet));
+    get_return_register_ref(ctx, REG_TYPE::FLOAT, 0) = copy[0];
+    get_return_register_ref(ctx, REG_TYPE::FLOAT, 1) = copy[1];
   } else if constexpr (ret_info.destination == ret_location_t::FLOAT_REG) {
     TRet ret = std::apply(func_ptr, params);
     uint64_t copy = 0;
