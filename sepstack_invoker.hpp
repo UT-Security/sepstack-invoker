@@ -88,9 +88,8 @@ enum class ret_location_t {
   INT_REG2,
   INT_FLOAT_REG,
   FLOAT_INT_REG,
-  FLOAT_REG2, // Stack references specified as a paremeter in a reg or stack but
-              // output in
-  // reg
+  FLOAT_REG2,
+  // Stack refs specified as a paremeter in a reg or stack but output in reg
   STACK_REFERENCE_IN_REG_OUT_REG,
   STACK_REFERENCE_IN_STACK_OUT_REG,
   NONE,
