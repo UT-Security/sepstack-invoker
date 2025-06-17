@@ -248,7 +248,7 @@ enum class REG_TYPE { INT, FLOAT };
 #if defined(unix) || defined(__unix) || defined(__unix__) || defined(linux) || \
     defined(__linux) || defined(__linux__)
 
-#  if defined(_M_X64) || defined(__x86_64__)
+#  if defined(__x86_64__) || defined(_M_X64)
 static constexpr unsigned int int_regs_available = 6;
 static constexpr unsigned int float_regs_available = 8;
 // Stack alignment is usually 16. However, there are some corner cases such as
@@ -277,7 +277,7 @@ static constexpr bool mixed_pair_structs_supported = false;
 
 #elif defined(_WIN32)
 
-#  if defined(_M_X64) || defined(__x86_64__)
+#  if defined(__x86_64__) || defined(_M_X64)
 static constexpr unsigned int int_regs_available = 4;
 static constexpr unsigned int float_regs_available = 4;
 static constexpr unsigned int expected_stack_alignment = 16;
@@ -455,7 +455,7 @@ constexpr param_info_t<TotalParams> classify_params() {
 #if defined(unix) || defined(__unix) || defined(__unix__) || defined(linux) || \
     defined(__linux) || defined(__linux__)
 
-#  if defined(_M_X64) || defined(__x86_64__)
+#  if defined(__x86_64__) || defined(_M_X64)
 
 uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
                                  unsigned int reg_num) {
@@ -514,8 +514,67 @@ uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
   abort();
 }
 
-uint64_t &get_stack_register_ref(sepstack_context_t *ctx) {
-  return ctx->target_stack_ptr;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+
+uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
+                                 unsigned int reg_num) {
+  if (type == REG_TYPE::INT) {
+    if (reg_num == 0) {
+      return ctx->x0;
+    } else if (reg_num == 1) {
+      return ctx->x1;
+    } else if (reg_num == 2) {
+      return ctx->x2;
+    } else if (reg_num == 3) {
+      return ctx->x3;
+    } else if (reg_num == 4) {
+      return ctx->x4;
+    } else if (reg_num == 5) {
+      return ctx->x5;
+    } else if (reg_num == 6) {
+      return ctx->x6;
+    } else if (reg_num == 7) {
+      return ctx->x7;
+    }
+  } else if (type == REG_TYPE::FLOAT) {
+    if (reg_num == 0) {
+      return ctx->q[0].low;
+    } else if (reg_num == 1) {
+      return ctx->q[1].low;
+    } else if (reg_num == 2) {
+      return ctx->q[2].low;
+    } else if (reg_num == 3) {
+      return ctx->q[3].low;
+    } else if (reg_num == 4) {
+      return ctx->q[4].low;
+    } else if (reg_num == 5) {
+      return ctx->q[5].low;
+    } else if (reg_num == 6) {
+      return ctx->q[6].low;
+    } else if (reg_num == 7) {
+      return ctx->q[7].low;
+    }
+  }
+  abort();
+}
+
+uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
+                                  unsigned int reg_num) {
+  if (type == REG_TYPE::INT) {
+    if (reg_num == 0) {
+      return ctx->x0;
+    } else if (reg_num == 1) {
+      return ctx->x1;
+    }
+  } else if (type == REG_TYPE::FLOAT) {
+    if (reg_num == 0) {
+      return ctx->q[0].low;
+    } else if (reg_num == 1) {
+      return ctx->q[1].low;
+    }
+  }
+
+  abort();
 }
 
 #  else
@@ -525,6 +584,10 @@ uint64_t &get_stack_register_ref(sepstack_context_t *ctx) {
 #else
 #  error "Unsupported OS"
 #endif
+
+uint64_t &get_stack_register_ref(sepstack_context_t *ctx) {
+  return ctx->target_stack_ptr;
+}
 
 //////////////////
 

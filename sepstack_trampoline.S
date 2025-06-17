@@ -2,6 +2,8 @@
 
 .text
 
+#if defined(__x86_64__) || defined(_M_X64)
+
 .global trampoline_stack_change
 trampoline_stack_change:
 	endbr64
@@ -110,7 +112,6 @@ springboard_stack_change:
 	movsd %xmm6, SEPSTACK_CONTEXT_OFFSET_XMM6(%r11)
 	movsd %xmm7, SEPSTACK_CONTEXT_OFFSET_XMM7(%r11)
 
-
 	// Clear direction flag before call or return
 	cld
 	// Clear the x87, MMX, and SSE state.
@@ -174,5 +175,11 @@ fxrstor_default_state:
         .byte 0x80 // mxcsr
         .byte 0x1f // mxcsr
         .space 486
+
+
+#else
+#error "Unknown architecture"
+#endif
+
 
 .section .note.GNU-stack,"",@progbits

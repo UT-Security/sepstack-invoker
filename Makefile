@@ -1,5 +1,5 @@
-CC:=clang
-CXX:=clang++
+CC?=clang
+CXX?=clang++
 CFLAGS+=-O0 -g
 CXXFLAGS+=$(CFLAGS) -std=c++20
 
