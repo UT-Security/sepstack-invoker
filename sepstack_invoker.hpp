@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <stdint.h>
 #include <stdlib.h>
@@ -67,7 +68,7 @@ static constexpr uintptr_t align_round_down(uintptr_t val,
                                             uintptr_t alignment) {
   return val & ~(alignment - 1);
 }
-///////////////
+//////////////////
 
 enum class param_location_t {
   INT_REG,
@@ -110,12 +111,113 @@ template <typename T>
 static constexpr bool is_two_reg_size = sizeof(T) > sizeof(void *) &&
                                         sizeof(T) <= 2 * sizeof(void *);
 
-// todo
-template <typename T> static constexpr bool is_pair_class = is_two_reg_size<T>;
+//////////////////
 
-template <typename T> using pair_class_first_type = double;
+// From https://github.com/yosh-matsuda/field-reflection
 
-template <typename T> using pair_class_second_type = uint64_t;
+namespace detail {
+template <typename T, std::size_t = 0>
+struct any_lref
+{
+    template <typename U>
+    requires (!std::same_as<U, T>)
+    constexpr operator U&() const&& noexcept;  // NOLINT
+    template <typename U>
+    requires (!std::same_as<U, T>)
+    constexpr operator U&() const& noexcept;  // NOLINT
+};
+
+template <typename T, std::size_t = 0>
+struct any_rref
+{
+    template <typename U>
+    requires (!std::same_as<U, T>)
+    constexpr operator U() const&& noexcept;  // NOLINT
+};
+
+template <typename T, std::size_t = 0>
+struct any_lref_no_base
+{
+    template <typename U>
+    requires (!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+    constexpr operator U&() const&& noexcept;  // NOLINT
+    template <typename U>
+    requires (!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+    constexpr operator U&() const& noexcept;  // NOLINT
+};
+
+template <typename T, std::size_t = 0>
+struct any_rref_no_base
+{
+    template <typename U>
+    requires (!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+    constexpr operator U() const&& noexcept;  // NOLINT
+};
+
+template <typename T, std::size_t ArgNum>
+concept constructible = (ArgNum == 0 && requires { T{}; }) ||
+    []<std::size_t I0, std::size_t... Is>(std::index_sequence<I0, Is...>) {
+        if constexpr (std::is_copy_constructible_v<T>)
+        {
+            return requires { T{any_lref_no_base<T, I0>(), any_lref<T, Is>()...}; };
+        }
+        else
+        {
+            return requires { T{any_rref_no_base<T, I0>(), any_rref<T, Is>()...}; };
+        }
+    }(std::make_index_sequence<ArgNum>());
+
+template <typename T, std::size_t N>
+requires std::is_aggregate_v<T>
+constexpr std::size_t field_count_max3 = []() {
+    if constexpr (N >= 3)
+    {
+        return std::numeric_limits<std::size_t>::max();
+    }
+    else if constexpr (constructible<T, N> && !constructible<T, N + 1>)
+    {
+        return N;
+    }
+    else
+    {
+        return field_count_max3<T, N + 1>;
+    }
+}();
+
+template <typename T>
+constexpr bool is_pair_class_impl() {
+  if constexpr (std::is_aggregate_v<T>) {
+    return detail::field_count_max3<T, 0> == 2;
+  }
+  return false;
+}
+};
+
+template <typename T> static constexpr bool is_pair_class = detail::is_pair_class_impl<T>();
+
+namespace detail {
+template <typename T>
+auto get_pair_class_first_type() -> decltype([](T p) {
+    if constexpr (is_pair_class<T>) {
+        auto [a, b] = p; return a;
+    }
+}(std::declval<T>()));
+
+template <typename T>
+auto get_pair_class_second_type() -> decltype([](T p) {
+    if constexpr (is_pair_class<T>) {
+        auto [a, b] = p; return b;
+    }
+}(std::declval<T>()));
+};
+
+template<typename T>
+using pair_class_first_type = decltype(detail::get_pair_class_first_type<T>());
+
+template<typename T>
+using pair_class_second_type = decltype(detail::get_pair_class_second_type<T>());
+
+//////////////////
 
 struct return_info_t {
   unsigned int int_registers_used;
@@ -400,7 +502,7 @@ uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
     if (reg_num == 0) {
       return ctx->rax;
     } else if (reg_num == 1) {
-      return ctx->rdi;
+      return ctx->rdx;
     }
   } else if (type == REG_TYPE::FLOAT) {
     if (reg_num == 0) {
