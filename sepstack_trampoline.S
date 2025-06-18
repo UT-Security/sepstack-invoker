@@ -20,7 +20,7 @@ trampoline_stack_change:
 	movq saved_sepstack_context@gottpoff(%rip), %r11
 	movq %fs:(%r11), %r11
 
-	// Clear non param reg except the tmp reg r11
+	// Clear non param registers, except the tmp reg r11
 	xorq %rax, %rax
 	xorq %rbx, %rbx
 	xorq %rbp, %rbp
@@ -176,6 +176,118 @@ fxrstor_default_state:
         .byte 0x1f // mxcsr
         .space 486
 
+
+#elif defined(__aarch64__) || defined(_M_ARM64)
+
+.global trampoline_stack_change
+trampoline_stack_change:
+	bti jc
+
+	// save callee-saved registers
+	stp d8, d9,   [sp, #-16]!
+	stp d10, d11, [sp, #-16]!
+	stp d12, d13, [sp, #-16]!
+	stp d14, d15, [sp, #-16]!
+	stp x19, x20, [sp, #-16]!
+	stp x21, x22, [sp, #-16]!
+	stp x23, x24, [sp, #-16]!
+	stp x25, x26, [sp, #-16]!
+	stp x27, x28, [sp, #-16]!
+	stp x29, x30, [sp, #-16]!
+
+	// Load context
+	mrs x16, tpidr_el0
+	adrp x0, :tlsdesc:saved_sepstack_context
+	ldr x17, [x0, :tlsdesc_lo12:saved_sepstack_context]
+	add x0, x0, :tlsdesc_lo12:saved_sepstack_context
+	.tlsdesccall saved_sepstack_context
+	blr x17
+	ldr x17, [x16, x0]
+
+	// Clear non param registers, except the tmp reg x16, x17
+	mov x9, #0
+	mov x10, #0
+	mov x11, #0
+	mov x12, #0
+	mov x13, #0
+	mov x14, #0
+	mov x15, #0
+	mov x16, #0
+
+	// Load params
+	ldr x0, [x17, SEPSTACK_CONTEXT_OFFSET_X0]
+	ldr x1, [x17, SEPSTACK_CONTEXT_OFFSET_X1]
+	ldr x2, [x17, SEPSTACK_CONTEXT_OFFSET_X2]
+	ldr x3, [x17, SEPSTACK_CONTEXT_OFFSET_X3]
+	ldr x4, [x17, SEPSTACK_CONTEXT_OFFSET_X4]
+	ldr x5, [x17, SEPSTACK_CONTEXT_OFFSET_X5]
+	ldr x6, [x17, SEPSTACK_CONTEXT_OFFSET_X6]
+	ldr x7, [x17, SEPSTACK_CONTEXT_OFFSET_X7]
+	ldr d0, [x17, SEPSTACK_CONTEXT_OFFSET_Q0]
+	ldr d1, [x17, SEPSTACK_CONTEXT_OFFSET_Q1]
+	ldr d2, [x17, SEPSTACK_CONTEXT_OFFSET_Q2]
+	ldr d3, [x17, SEPSTACK_CONTEXT_OFFSET_Q3]
+	ldr d4, [x17, SEPSTACK_CONTEXT_OFFSET_Q4]
+	ldr d5, [x17, SEPSTACK_CONTEXT_OFFSET_Q5]
+	ldr d6, [x17, SEPSTACK_CONTEXT_OFFSET_Q6]
+	ldr d7, [x17, SEPSTACK_CONTEXT_OFFSET_Q7]
+
+	// save old rsp and load new rsp
+	// save this to context as this value is needed for nested calls
+	mov x16, sp
+	str x16, [x17, SEPSTACK_CONTEXT_OFFSET_SOURCE_STACK_PTR]
+	ldr x16, [x17, SEPSTACK_CONTEXT_OFFSET_TARGET_STACK_PTR]
+	mov sp, x16
+
+	// clear x16
+	mov x16, #0
+
+	// load address of the target function and invoke
+	ldr x17, [x17, SEPSTACK_CONTEXT_OFFSET_TARGET_PROG_CTR]
+	blr x17
+
+	// Save x0
+	mov x19, x0
+
+	// Load context
+	mrs x16, tpidr_el0
+	adrp x0, :tlsdesc:saved_sepstack_context
+	ldr x17, [x0, :tlsdesc_lo12:saved_sepstack_context]
+	add x0, x0, :tlsdesc_lo12:saved_sepstack_context
+	.tlsdesccall saved_sepstack_context
+	blr x17
+	ldr x17, [x16, x0]
+
+	// Restore x0
+	mov x0, x19
+
+	// restore old stack
+	ldr x16, [x17, SEPSTACK_CONTEXT_OFFSET_SOURCE_STACK_PTR]
+	mov sp, x16
+
+	// Save return registers
+	str  x0, [x17, SEPSTACK_CONTEXT_OFFSET_X0]
+	str  x1, [x17, SEPSTACK_CONTEXT_OFFSET_X1]
+	// Save floating point
+	str  d0, [x17, SEPSTACK_CONTEXT_OFFSET_Q0]
+	str  d1, [x17, SEPSTACK_CONTEXT_OFFSET_Q1]
+
+	// restore callee-saved registers
+	ldp x29, x30, [sp], 16
+	ldp x27, x28, [sp], 16
+	ldp x25, x26, [sp], 16
+	ldp x23, x24, [sp], 16
+	ldp x21, x22, [sp], 16
+	ldp x19, x20, [sp], 16
+	ldp d14, d15, [sp], 16
+	ldp d12, d13, [sp], 16
+	ldp d10, d11, [sp], 16
+	ldp d8, d9,   [sp], 16
+	br x30
+
+.global springboard_stack_change
+springboard_stack_change:
+	.inst 0x0000dead
 
 #else
 #error "Unknown architecture"
