@@ -249,6 +249,11 @@ static constexpr unsigned int stack_param_offset = 8;
 // If yes, this is true. Else if they are treated as two uint64_t, this is
 // false.
 static constexpr bool mixed_pair_structs_supported = true;
+// When returning a large struct, the caller passes in a pointer to the memory
+// location where the callee should write the struct. If this pointer is
+// specified in one of the parameter registers, this value should be true, else
+// false.
+static constexpr bool returnslot_ptr_reg_consumes_parameter = true;
 #  elif defined(__aarch64__)
 static constexpr unsigned int int_regs_available = 8;
 static constexpr unsigned int float_regs_available = 8;
@@ -259,6 +264,11 @@ static constexpr unsigned int stack_param_offset = 0;
 // If yes, this is true. Else if they are treated as two uint64_t, this is
 // false.
 static constexpr bool mixed_pair_structs_supported = false;
+// When returning a large struct, the caller passes in a pointer to the memory
+// location where the callee should write the struct. If this pointer is
+// specified in one of the parameter registers, this value should be true, else
+// false.
+static constexpr bool returnslot_ptr_reg_consumes_parameter = false;
 #  else
 #    error "Unsupported architecture"
 #  endif
@@ -502,6 +512,10 @@ static uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
   abort();
 }
 
+static uint64_t &get_return_slotptr_register_ref(sepstack_context_t *ctx) {
+  return ctx->rdi;
+}
+
 #  elif defined(__aarch64__) || defined(_M_ARM64)
 
 static uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
@@ -563,6 +577,10 @@ static uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
   }
 
   abort();
+}
+
+static uint64_t &get_return_slotptr_register_ref(sepstack_context_t *ctx) {
+  return ctx->x8;
 }
 
 #  else
@@ -754,7 +772,7 @@ void *push_return_and_params(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
   if constexpr (RetDestination ==
                 ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG) {
     ret = stack_extradata_loc;
-    get_param_register_ref(ctx, REG_TYPE::INT, 0) = ret;
+    get_return_slotptr_register_ref(ctx) = ret;
     safe_range(sbx_mem_start, sbx_mem_end, stack_extradata_loc,
                stack_extradata_loc + sizeof(TRet));
     stack_extradata_loc += sizeof(TRet);
@@ -780,8 +798,10 @@ void *push_return_and_params(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
   }
 
   constexpr unsigned int IntRegParams =
-      (RetDestination == ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG) ? 1
-                                                                         : 0;
+      (RetDestination == ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG &&
+       returnslot_ptr_reg_consumes_parameter)
+          ? 1
+          : 0;
   push_param<0, TotalParams, IntRegParams, 0, ParamDestinations,
              TFormalParams...>(ctx, sbx_mem_start, sbx_mem_end, stackloc,
                                stack_extradata_loc,
@@ -1059,12 +1079,14 @@ collect_params_from_context(sepstack_context_t *ctx, uintptr_t sbx_mem_start,
     stackloc += sizeof(TRet *);
   } else if constexpr (RetDestination ==
                        ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG) {
-    *out_ret_slot = get_param_register_ref(ctx, REG_TYPE::INT, 0);
+    *out_ret_slot = get_return_slotptr_register_ref(ctx);
   }
 
   constexpr unsigned int IntRegParams =
-      (RetDestination == ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG) ? 1
-                                                                         : 0;
+      (RetDestination == ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG &&
+       returnslot_ptr_reg_consumes_parameter)
+          ? 1
+          : 0;
   return collect_params_from_context_noret<0, TotalParams, IntRegParams, 0,
                                            ParamDestinations, TParams...>(
       ctx, sbx_mem_start, sbx_mem_end, stackloc);
