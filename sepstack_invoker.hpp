@@ -97,12 +97,12 @@ enum class ret_location_t {
 
 template <typename T>
 static constexpr bool is_trival_destr_and_copy_v =
-    std::is_trivially_destructible_v<T>
-        &&std::is_trivially_copy_constructible_v<T>;
+    std::is_trivially_destructible_v<T> &&
+    std::is_trivially_copy_constructible_v<T>;
 
 template <typename T>
 static constexpr bool is_class_with_trival_destr_and_copy_v =
-    std::is_class_v<T> &&is_trival_destr_and_copy_v<T>;
+    std::is_class_v<T> && is_trival_destr_and_copy_v<T>;
 
 template <typename T>
 static constexpr bool is_one_reg_size = sizeof(T) <= sizeof(void *);
@@ -115,106 +115,94 @@ static constexpr bool is_two_reg_size = sizeof(T) > sizeof(void *) &&
 // From https://github.com/yosh-matsuda/field-reflection
 
 namespace detail {
-template <typename T, std::size_t = 0>
-struct any_lref
-{
-    template <typename U>
-    requires (!std::same_as<U, T>)
-    constexpr operator U&() const&& noexcept;  // NOLINT
-    template <typename U>
-    requires (!std::same_as<U, T>)
-    constexpr operator U&() const& noexcept;  // NOLINT
+template <typename T, std::size_t = 0> struct any_lref {
+  template <typename U>
+    requires(!std::same_as<U, T>)
+  constexpr operator U &() const && noexcept; // NOLINT
+  template <typename U>
+    requires(!std::same_as<U, T>)
+  constexpr operator U &() const & noexcept; // NOLINT
 };
 
-template <typename T, std::size_t = 0>
-struct any_rref
-{
-    template <typename U>
-    requires (!std::same_as<U, T>)
-    constexpr operator U() const&& noexcept;  // NOLINT
+template <typename T, std::size_t = 0> struct any_rref {
+  template <typename U>
+    requires(!std::same_as<U, T>)
+  constexpr operator U() const && noexcept; // NOLINT
 };
 
-template <typename T, std::size_t = 0>
-struct any_lref_no_base
-{
-    template <typename U>
-    requires (!std::is_base_of_v<U, T> && !std::same_as<U, T>)
-    constexpr operator U&() const&& noexcept;  // NOLINT
-    template <typename U>
-    requires (!std::is_base_of_v<U, T> && !std::same_as<U, T>)
-    constexpr operator U&() const& noexcept;  // NOLINT
+template <typename T, std::size_t = 0> struct any_lref_no_base {
+  template <typename U>
+    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+  constexpr operator U &() const && noexcept; // NOLINT
+  template <typename U>
+    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+  constexpr operator U &() const & noexcept; // NOLINT
 };
 
-template <typename T, std::size_t = 0>
-struct any_rref_no_base
-{
-    template <typename U>
-    requires (!std::is_base_of_v<U, T> && !std::same_as<U, T>)
-    constexpr operator U() const&& noexcept;  // NOLINT
+template <typename T, std::size_t = 0> struct any_rref_no_base {
+  template <typename U>
+    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+  constexpr operator U() const && noexcept; // NOLINT
 };
 
 template <typename T, std::size_t ArgNum>
-concept constructible = (ArgNum == 0 && requires { T{}; }) ||
+concept constructible =
+    (ArgNum == 0 && requires { T{}; }) ||
     []<std::size_t I0, std::size_t... Is>(std::index_sequence<I0, Is...>) {
-        if constexpr (std::is_copy_constructible_v<T>)
-        {
-            return requires { T{any_lref_no_base<T, I0>(), any_lref<T, Is>()...}; };
-        }
-        else
-        {
-            return requires { T{any_rref_no_base<T, I0>(), any_rref<T, Is>()...}; };
-        }
+      if constexpr (std::is_copy_constructible_v<T>) {
+        return requires { T{any_lref_no_base<T, I0>(), any_lref<T, Is>()...}; };
+      } else {
+        return requires { T{any_rref_no_base<T, I0>(), any_rref<T, Is>()...}; };
+      }
     }(std::make_index_sequence<ArgNum>());
 
 template <typename T, std::size_t N>
-requires std::is_aggregate_v<T>
+  requires std::is_aggregate_v<T>
 constexpr std::size_t field_count_max3 = []() {
-    if constexpr (N >= 3)
-    {
-        return std::numeric_limits<std::size_t>::max();
-    }
-    else if constexpr (constructible<T, N> && !constructible<T, N + 1>)
-    {
-        return N;
-    }
-    else
-    {
-        return field_count_max3<T, N + 1>;
-    }
+  if constexpr (N >= 3) {
+    return std::numeric_limits<std::size_t>::max();
+  } else if constexpr (constructible<T, N> && !constructible<T, N + 1>) {
+    return N;
+  } else {
+    return field_count_max3<T, N + 1>;
+  }
 }();
 
-template <typename T>
-constexpr bool is_pair_class_impl() {
+template <typename T> constexpr bool is_pair_class_impl() {
   if constexpr (std::is_aggregate_v<T>) {
     return detail::field_count_max3<T, 0> == 2;
   }
   return false;
 }
-};
+}; // namespace detail
 
-template <typename T> static constexpr bool is_pair_class = detail::is_pair_class_impl<T>();
+template <typename T>
+static constexpr bool is_pair_class = detail::is_pair_class_impl<T>();
 
 namespace detail {
 template <typename T>
 auto get_pair_class_first_type() -> decltype([](T p) {
-    if constexpr (is_pair_class<T>) {
-        auto [a, b] = p; return a;
-    }
+  if constexpr (is_pair_class<T>) {
+    auto [a, b] = p;
+    return a;
+  }
 }(std::declval<T>()));
 
 template <typename T>
 auto get_pair_class_second_type() -> decltype([](T p) {
-    if constexpr (is_pair_class<T>) {
-        auto [a, b] = p; return b;
-    }
+  if constexpr (is_pair_class<T>) {
+    auto [a, b] = p;
+    return b;
+  }
 }(std::declval<T>()));
-};
+}; // namespace detail
 
-template<typename T>
+template <typename T>
 using pair_class_first_type = decltype(detail::get_pair_class_first_type<T>());
 
-template<typename T>
-using pair_class_second_type = decltype(detail::get_pair_class_second_type<T>());
+template <typename T>
+using pair_class_second_type =
+    decltype(detail::get_pair_class_second_type<T>());
 
 //////////////////
 
@@ -457,8 +445,8 @@ constexpr param_info_t<TotalParams> classify_params() {
 
 #  if defined(__x86_64__) || defined(_M_X64)
 
-uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
-                                 unsigned int reg_num) {
+static uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
+                                        unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
       return ctx->rdi;
@@ -495,8 +483,8 @@ uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
   abort();
 }
 
-uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
-                                  unsigned int reg_num) {
+static uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
+                                         unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
       return ctx->rax;
@@ -514,10 +502,10 @@ uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
   abort();
 }
 
-#elif defined(__aarch64__) || defined(_M_ARM64)
+#  elif defined(__aarch64__) || defined(_M_ARM64)
 
-uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
-                                 unsigned int reg_num) {
+static uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
+                                        unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
       return ctx->x0;
@@ -558,8 +546,8 @@ uint64_t &get_param_register_ref(sepstack_context_t *ctx, REG_TYPE type,
   abort();
 }
 
-uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
-                                  unsigned int reg_num) {
+static uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
+                                         unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
       return ctx->x0;
@@ -585,14 +573,14 @@ uint64_t &get_return_register_ref(sepstack_context_t *ctx, REG_TYPE type,
 #  error "Unsupported OS"
 #endif
 
-uint64_t &get_stack_register_ref(sepstack_context_t *ctx) {
+static uint64_t &get_stack_register_ref(sepstack_context_t *ctx) {
   return ctx->target_stack_ptr;
 }
 
 //////////////////
 
-void safe_range(uintptr_t sbx_mem_start, uintptr_t sbx_mem_end, uintptr_t start,
-                uintptr_t end) {
+static void safe_range(uintptr_t sbx_mem_start, uintptr_t sbx_mem_end,
+                       uintptr_t start, uintptr_t end) {
   if (start > end)
     abort();
   if (start < sbx_mem_start || start > sbx_mem_end)
