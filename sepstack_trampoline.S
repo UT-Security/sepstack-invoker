@@ -180,6 +180,8 @@ fxrstor_default_state:
 
 #elif defined(__aarch64__) || defined(_M_ARM64)
 
+// todo: floating point state?
+
 .global trampoline_stack_change
 trampoline_stack_change:
 	bti jc
