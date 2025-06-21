@@ -314,7 +314,7 @@ springboard_stack_change:
 	bti jc
 
 	// Save x0
-	mov x19, x0
+	mov x9, x0
 
 	// Load context
 	mrs x16, tpidr_el0
@@ -326,7 +326,7 @@ springboard_stack_change:
 	ldr x17, [x16, x0]
 
 	// Restore x0
-	mov x0, x19
+	mov x0, x9
 
 	// Save params
 	str x0, [x17, SEPSTACK_CONTEXT_OFFSET_X0]
