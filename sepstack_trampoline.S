@@ -354,7 +354,7 @@ springboard_stack_change:
 	ldr x16, [x17, SEPSTACK_CONTEXT_OFFSET_SOURCE_STACK_PTR]
 	mov sp, x16
 
-	// save context and extra reg to align the stack
+	// save context and return reg
 	stp x17, x30, [sp, #-16]!
 
 	// load address of the target function
@@ -368,7 +368,7 @@ springboard_stack_change:
 	// invoke
 	blr x17
 
-	// restore context
+	// restore context and return reg
 	ldp x17, x30, [sp], 16
 
 	// Zero non-callee save registers except x17 and return registers
